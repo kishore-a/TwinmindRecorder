@@ -8,12 +8,38 @@
 import SwiftUI
 
 struct ContentView: View {
+    @StateObject private var recorder = AudioRecorderManager()
+    
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
+        VStack(spacing: 24) {
+            Text("Twinmind Recorder")
+                .font(.largeTitle)
+                .bold()
+            HStack(spacing: 20) {
+                Button(action: {
+                    recorder.startRecording()
+                }) {
+                    Image(systemName: "record.circle")
+                        .resizable()
+                        .frame(width: 48, height: 48)
+                        .foregroundColor(recorder.isRecording ? .red : .gray)
+                }
+                Button(action: {
+                    recorder.stopRecording()
+                }) {
+                    Image(systemName: "stop.circle")
+                        .resizable()
+                        .frame(width: 48, height: 48)
+                        .foregroundColor(.gray)
+                }
+            }
+            .padding()
+            Text(recorder.isRecording ? "Recording..." : "Tap to record")
+                .foregroundColor(.secondary)
+            Divider()
+            Text("Session List (placeholder)")
+                .font(.headline)
+            Spacer()
         }
         .padding()
     }
