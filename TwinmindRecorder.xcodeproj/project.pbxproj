@@ -27,6 +27,7 @@
 		292E651A2E152BF600012B80 /* TwinmindRecorder.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TwinmindRecorder.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		292E652A2E152BF800012B80 /* TwinmindRecorderTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TwinmindRecorderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		292E65342E152BF800012B80 /* TwinmindRecorderUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TwinmindRecorderUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		2942E8A42E15B6D00049A5C0 /* TwinmindRecorder.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = TwinmindRecorder.xctestplan; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -88,6 +89,7 @@
 		292E65112E152BF600012B80 = {
 			isa = PBXGroup;
 			children = (
+				2942E8A42E15B6D00049A5C0 /* TwinmindRecorder.xctestplan */,
 				292E651C2E152BF600012B80 /* TwinmindRecorder */,
 				292E652D2E152BF800012B80 /* TwinmindRecorderTests */,
 				292E65372E152BF800012B80 /* TwinmindRecorderUITests */,

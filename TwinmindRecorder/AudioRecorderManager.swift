@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import AVFAudio
+import SwiftData
 
 class AudioRecorderManager: NSObject, ObservableObject {
     private let audioEngine = AVAudioEngine()
@@ -8,14 +9,28 @@ class AudioRecorderManager: NSObject, ObservableObject {
     private var audioFile: AVAudioFile?
     private var outputURL: URL?
     private var recordingFormat: AVAudioFormat?
+    private var segmentStartTime: Date?
+    private var segmentTimer: Timer?
+    private let segmentDuration: TimeInterval = 30 // seconds, configurable
+    private var currentSegmentIndex: Int = 0
+    private var currentSession: RecordingSession?
     
     @Published var isRecording = false
     @Published var error: Error?
     @Published var permissionDenied = false
+    @Published var segments: [(url: URL, startTime: Date)] = []
+    
+    // SwiftData context for saving sessions and segments
+    private var modelContext: ModelContext?
     
     override init() {
         super.init()
         setupNotifications()
+    }
+    
+    // Call this to inject the SwiftData context (e.g., from your App or View)
+    func setModelContext(_ context: ModelContext) {
+        self.modelContext = context
     }
     
     private func setupAudioSession() {
@@ -59,32 +74,52 @@ class AudioRecorderManager: NSObject, ObservableObject {
                 return
             }
             self.setupAudioSession()
-            self.beginRecording()
+            self.segments = []
+            self.currentSegmentIndex = 0
+            // Create a new recording session in SwiftData
+            let session = RecordingSession(date: Date(), duration: 0)
+            self.currentSession = session
+            self.modelContext?.insert(session)
+            self.beginRecordingSegment()
         }
     }
     
-    private func beginRecording() {
+    private func beginRecordingSegment() {
         do {
             let format = audioEngine.inputNode.outputFormat(forBus: 0)
             self.recordingFormat = format
-            let fileName = "recording_\(Date().timeIntervalSince1970).m4a"
+            let now = Date()
+            self.segmentStartTime = now
+            let fileName = "segment_\(now.timeIntervalSince1970)_\(currentSegmentIndex).m4a"
             let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
             self.outputURL = url
             self.audioFile = try AVAudioFile(forWriting: url, settings: format.settings)
-            audioEngine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] (buffer, time) in
-                guard let self = self else { return }
-                do {
-                    try self.audioFile?.write(from: buffer)
-                } catch {
-                    DispatchQueue.main.async {
-                        self.error = error
-                        self.stopRecording()
+            // Only install the tap and start the engine once
+            if !audioEngine.isRunning {
+                audioEngine.inputNode.removeTap(onBus: 0)
+                // Install a tap to receive audio buffers in real time
+                audioEngine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] (buffer, time) in
+                    guard let self = self else { return }
+                    do {
+                        // Write the audio buffer to the current file
+                        try self.audioFile?.write(from: buffer)
+                    } catch {
+                        DispatchQueue.main.async {
+                            self.error = error
+                            self.stopRecording()
+                        }
                     }
                 }
+                try audioEngine.start()
             }
-            try audioEngine.start()
             DispatchQueue.main.async {
                 self.isRecording = true
+            }
+            // Start timer for segment duration
+            segmentTimer?.invalidate()
+            // This timer will fire after segmentDuration seconds to rotate the segment
+            segmentTimer = Timer.scheduledTimer(withTimeInterval: segmentDuration, repeats: false) { [weak self] _ in
+                self?.rotateSegment()
             }
         } catch {
             DispatchQueue.main.async {
@@ -94,7 +129,36 @@ class AudioRecorderManager: NSObject, ObservableObject {
         }
     }
     
+    private func rotateSegment() {
+        // Save current segment info to the published array and SwiftData
+        if let url = self.outputURL, let startTime = self.segmentStartTime {
+            DispatchQueue.main.async {
+                self.segments.append((url: url, startTime: startTime))
+            }
+            // Calculate segment duration
+            let duration = segmentDuration
+            // Save segment to SwiftData if context and session are available
+            if let context = self.modelContext, let session = self.currentSession {
+                // AudioSegment stores file URL as a string for SwiftData compatibility
+                let segment = AudioSegment(startTime: startTime.timeIntervalSince1970, duration: duration, fileURL: url)
+                segment.session = session
+                context.insert(segment)
+                session.segments.append(segment)
+            }
+        }
+        // Close current file and prepare for the next segment
+        self.audioFile = nil
+        self.outputURL = nil
+        self.segmentStartTime = nil
+        self.currentSegmentIndex += 1
+        // Start new segment if still recording
+        if isRecording {
+            beginRecordingSegment()
+        }
+    }
+    
     func stopRecording() {
+        segmentTimer?.invalidate()
         audioEngine.inputNode.removeTap(onBus: 0)
         audioEngine.stop()
         do {
@@ -102,10 +166,35 @@ class AudioRecorderManager: NSObject, ObservableObject {
         } catch {
             self.error = error
         }
+        // Save last segment
+        if let url = self.outputURL, let startTime = self.segmentStartTime {
+            self.segments.append((url: url, startTime: startTime))
+            let duration = Date().timeIntervalSince(startTime)
+            if let context = self.modelContext, let session = self.currentSession {
+                let segment = AudioSegment(startTime: startTime.timeIntervalSince1970, duration: duration, fileURL: url)
+                segment.session = session
+                context.insert(segment)
+                session.segments.append(segment)
+                // Update session duration
+                session.duration += duration
+            }
+        }
+        self.audioFile = nil
+        self.outputURL = nil
+        self.segmentStartTime = nil
         isRecording = false
+        // Optionally, update the session's total duration in SwiftData
+        if let context = self.modelContext, let _ = self.currentSession {
+            do {
+                try context.save()
+            } catch {
+                print("Failed to save context: \(error)")
+            }
+        }
     }
     
     func pauseRecording() {
+        segmentTimer?.invalidate()
         audioEngine.pause()
         isRecording = false
     }
@@ -120,7 +209,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
             if let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
                 let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
                 if options.contains(.shouldResume) && !isRecording {
-                    beginRecording()
+                    beginRecordingSegment()
                 }
             }
         }
@@ -137,5 +226,6 @@ class AudioRecorderManager: NSObject, ObservableObject {
     
     deinit {
         NotificationCenter.default.removeObserver(self)
+        segmentTimer?.invalidate()
     }
 } 

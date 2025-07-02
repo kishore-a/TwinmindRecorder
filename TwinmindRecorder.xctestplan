@@ -1,0 +1,37 @@
+{
+  "configurations" : [
+    {
+      "id" : "A1417000-D22A-4BF1-95FC-A938A2A53E0B",
+      "name" : "Test Scheme Action",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:TwinmindRecorder.xcodeproj",
+      "identifier" : "292E65192E152BF600012B80",
+      "name" : "TwinmindRecorder"
+    }
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : true,
+      "target" : {
+        "containerPath" : "container:TwinmindRecorder.xcodeproj",
+        "identifier" : "292E65292E152BF800012B80",
+        "name" : "TwinmindRecorderTests"
+      }
+    },
+    {
+      "parallelizable" : true,
+      "target" : {
+        "containerPath" : "container:TwinmindRecorder.xcodeproj",
+        "identifier" : "292E65332E152BF800012B80",
+        "name" : "TwinmindRecorderUITests"
+      }
+    }
+  ],
+  "version" : 1
+}
