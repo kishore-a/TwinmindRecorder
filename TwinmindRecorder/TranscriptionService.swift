@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import AVFoundation
 
 class TranscriptionService {
     // Singleton instance for easy access
@@ -50,6 +51,7 @@ class TranscriptionService {
             completion(.failure(NSError(domain: "API", code: 400, userInfo: [NSLocalizedDescriptionKey: "Audio file URL missing"])))
             return
         }
+        // 2.5. Remove resampling step; use original fileURL
         // 3. Prepare the request
         let url = URL(string: "https://api.openai.com/v1/audio/transcriptions")!
         var request = URLRequest(url: url)
@@ -67,8 +69,8 @@ class TranscriptionService {
         // Add file parameter
         if let fileData = try? Data(contentsOf: fileURL) {
             body.append("--\(boundary)\r\n".data(using: .utf8)!)
-            body.append("Content-Disposition: form-data; name=\"file\"; filename=\"segment.m4a\"\r\n".data(using: .utf8)!)
-            body.append("Content-Type: audio/m4a\r\n\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"file\"; filename=\"segment.wav\"\r\n".data(using: .utf8)!)
+            body.append("Content-Type: audio/wav\r\n\r\n".data(using: .utf8)!)
             body.append(fileData)
             body.append("\r\n".data(using: .utf8)!)
         } else {

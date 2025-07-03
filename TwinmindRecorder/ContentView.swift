@@ -45,6 +45,14 @@ struct ContentView: View {
                     }
                     .padding()
                     
+                    // Timer display
+                    if recorder.isRecording {
+                        Text(timerString(from: recorder.elapsedTime))
+                            .font(.title2)
+                            .monospacedDigit()
+                            .foregroundColor(.primary)
+                    }
+                    
                     Text(recorder.isRecording ? "Recording..." : "Tap to record")
                         .foregroundColor(.secondary)
                     
@@ -110,4 +118,12 @@ struct ContentView: View {
 #Preview {
     ContentView()
         .modelContainer(for: RecordingSession.self, inMemory: true)
+}
+
+// Helper for formatting timer
+private func timerString(from time: TimeInterval) -> String {
+    let totalSeconds = Int(time)
+    let minutes = totalSeconds / 60
+    let seconds = totalSeconds % 60
+    return String(format: "%02d:%02d", minutes, seconds)
 }

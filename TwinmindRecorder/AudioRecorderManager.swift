@@ -19,9 +19,12 @@ class AudioRecorderManager: NSObject, ObservableObject {
     @Published var error: Error?
     @Published var permissionDenied = false
     @Published var segments: [(url: URL, startTime: Date)] = []
+    @Published var elapsedTime: TimeInterval = 0
     
     // SwiftData context for saving sessions and segments
     private var modelContext: ModelContext?
+    
+    private var elapsedTimer: Timer?
     
     override init() {
         super.init()
@@ -49,10 +52,12 @@ class AudioRecorderManager: NSObject, ObservableObject {
     
     func requestPermission(completion: @escaping (Bool) -> Void) {
         if #available(iOS 17.0, *) {
-            AVAudioApplication.requestRecordPermission { granted in
-                DispatchQueue.main.async {
-                    self.permissionDenied = !granted
-                    completion(granted)
+            DispatchQueue.main.async {
+                AVAudioApplication.requestRecordPermission { granted in
+                    DispatchQueue.main.async {
+                        self.permissionDenied = !granted
+                        completion(granted)
+                    }
                 }
             }
         } else {
@@ -76,14 +81,14 @@ class AudioRecorderManager: NSObject, ObservableObject {
             self.setupAudioSession()
             self.segments = []
             self.currentSegmentIndex = 0
+            self.elapsedTime = 0
+            self.startElapsedTimer()
             // Create a new recording session in SwiftData
             let session = RecordingSession(date: Date(), duration: 0)
             self.currentSession = session
             self.modelContext?.insert(session)
-            
             // Create audio buffer for this session
             AudioBuffer.shared.createBuffer(for: session.id)
-            
             self.beginRecordingSegment()
         }
     }
@@ -98,10 +103,10 @@ class AudioRecorderManager: NSObject, ObservableObject {
             let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
             self.outputURL = url
             
-            // Use WAV format with specific settings for better compatibility
+            // Use WAV format with specific settings for best playback and Whisper compatibility
             let wavSettings: [String: Any] = [
                 AVFormatIDKey: Int(kAudioFormatLinearPCM),
-                AVSampleRateKey: 16000, // Whisper prefers 16kHz
+                AVSampleRateKey: 44100, // CD quality for playback
                 AVNumberOfChannelsKey: 1, // Mono audio
                 AVLinearPCMBitDepthKey: 16, // 16-bit
                 AVLinearPCMIsFloatKey: false,
@@ -189,6 +194,8 @@ class AudioRecorderManager: NSObject, ObservableObject {
         segmentTimer?.invalidate()
         audioEngine.inputNode.removeTap(onBus: 0)
         audioEngine.stop()
+        elapsedTimer?.invalidate()
+        elapsedTimer = nil
         do {
             try session.setActive(false)
         } catch {
@@ -223,6 +230,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
         self.outputURL = nil
         self.segmentStartTime = nil
         isRecording = false
+        self.elapsedTime = 0
         // Optionally, update the session's total duration in SwiftData
         if let context = self.modelContext, let _ = self.currentSession {
             do {
@@ -237,6 +245,8 @@ class AudioRecorderManager: NSObject, ObservableObject {
         segmentTimer?.invalidate()
         audioEngine.pause()
         isRecording = false
+        elapsedTimer?.invalidate()
+        elapsedTimer = nil
     }
     
     @objc private func handleInterruption(_ notification: Notification) {
@@ -261,6 +271,14 @@ class AudioRecorderManager: NSObject, ObservableObject {
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
         if reason == .oldDeviceUnavailable {
             if isRecording { pauseRecording() }
+        }
+    }
+    
+    private func startElapsedTimer() {
+        elapsedTimer?.invalidate()
+        elapsedTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            guard let self = self, self.isRecording else { return }
+            self.elapsedTime += 1
         }
     }
     
