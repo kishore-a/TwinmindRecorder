@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import SwiftData
 
 @main
 struct TwinmindRecorderApp: App {
@@ -13,5 +14,6 @@ struct TwinmindRecorderApp: App {
         WindowGroup {
             ContentView()
         }
+        .modelContainer(for: [RecordingSession.self, AudioSegment.self, Transcription.self])
     }
 }

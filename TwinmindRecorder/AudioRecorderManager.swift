@@ -80,6 +80,10 @@ class AudioRecorderManager: NSObject, ObservableObject {
             let session = RecordingSession(date: Date(), duration: 0)
             self.currentSession = session
             self.modelContext?.insert(session)
+            
+            // Create audio buffer for this session
+            AudioBuffer.shared.createBuffer(for: session.id)
+            
             self.beginRecordingSegment()
         }
     }
@@ -90,10 +94,21 @@ class AudioRecorderManager: NSObject, ObservableObject {
             self.recordingFormat = format
             let now = Date()
             self.segmentStartTime = now
-            let fileName = "segment_\(now.timeIntervalSince1970)_\(currentSegmentIndex).m4a"
+            let fileName = "segment_\(now.timeIntervalSince1970)_\(currentSegmentIndex).wav"
             let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
             self.outputURL = url
-            self.audioFile = try AVAudioFile(forWriting: url, settings: format.settings)
+            
+            // Use WAV format with specific settings for better compatibility
+            let wavSettings: [String: Any] = [
+                AVFormatIDKey: Int(kAudioFormatLinearPCM),
+                AVSampleRateKey: 16000, // Whisper prefers 16kHz
+                AVNumberOfChannelsKey: 1, // Mono audio
+                AVLinearPCMBitDepthKey: 16, // 16-bit
+                AVLinearPCMIsFloatKey: false,
+                AVLinearPCMIsBigEndianKey: false
+            ]
+            
+            self.audioFile = try AVAudioFile(forWriting: url, settings: wavSettings)
             // Only install the tap and start the engine once
             if !audioEngine.isRunning {
                 audioEngine.inputNode.removeTap(onBus: 0)
@@ -139,11 +154,24 @@ class AudioRecorderManager: NSObject, ObservableObject {
             let duration = segmentDuration
             // Save segment to SwiftData if context and session are available
             if let context = self.modelContext, let session = self.currentSession {
-                // AudioSegment stores file URL as a string for SwiftData compatibility
-                let segment = AudioSegment(startTime: startTime.timeIntervalSince1970, duration: duration, fileURL: url)
-                segment.session = session
-                context.insert(segment)
-                session.segments.append(segment)
+                DispatchQueue.main.async {
+                    let segment = AudioSegment(startTime: startTime.timeIntervalSince1970, duration: duration, fileURL: url)
+                    segment.session = session
+                    context.insert(segment)
+                    session.segments.append(segment)
+                    session.duration += duration
+                    try? context.save()
+                    
+                    // Add audio data to buffer
+                    if let audioData = try? Data(contentsOf: url) {
+                        AudioBuffer.shared.addAudioData(audioData, for: session.id, segmentIndex: self.currentSegmentIndex)
+                    }
+                    
+                    // Trigger transcription for the new segment
+                    TranscriptionService.shared.transcribe(segment: segment, context: context) { _ in
+                        // Optionally handle completion or update UI
+                    }
+                }
             }
         }
         // Close current file and prepare for the next segment
@@ -171,12 +199,24 @@ class AudioRecorderManager: NSObject, ObservableObject {
             self.segments.append((url: url, startTime: startTime))
             let duration = Date().timeIntervalSince(startTime)
             if let context = self.modelContext, let session = self.currentSession {
-                let segment = AudioSegment(startTime: startTime.timeIntervalSince1970, duration: duration, fileURL: url)
-                segment.session = session
-                context.insert(segment)
-                session.segments.append(segment)
-                // Update session duration
-                session.duration += duration
+                DispatchQueue.main.async {
+                    let segment = AudioSegment(startTime: startTime.timeIntervalSince1970, duration: duration, fileURL: url)
+                    segment.session = session
+                    context.insert(segment)
+                    session.segments.append(segment)
+                    session.duration += duration
+                    try? context.save()
+                    
+                    // Add audio data to buffer
+                    if let audioData = try? Data(contentsOf: url) {
+                        AudioBuffer.shared.addAudioData(audioData, for: session.id, segmentIndex: self.currentSegmentIndex)
+                    }
+                    
+                    // Trigger transcription for the last segment
+                    TranscriptionService.shared.transcribe(segment: segment, context: context) { _ in
+                        // Optionally handle completion or update UI
+                    }
+                }
             }
         }
         self.audioFile = nil
