@@ -2,6 +2,7 @@ import Foundation
 import AVFoundation
 import AVFAudio
 import SwiftData
+import Accelerate
 
 class AudioRecorderManager: NSObject, ObservableObject {
     private let audioEngine = AVAudioEngine()
@@ -20,6 +21,7 @@ class AudioRecorderManager: NSObject, ObservableObject {
     @Published var permissionDenied = false
     @Published var segments: [(url: URL, startTime: Date)] = []
     @Published var elapsedTime: TimeInterval = 0
+    @Published var waveformSamples: [Float] = [] // Live waveform samples
     
     // SwiftData context for saving sessions and segments
     private var modelContext: ModelContext?
@@ -84,7 +86,8 @@ class AudioRecorderManager: NSObject, ObservableObject {
             self.elapsedTime = 0
             self.startElapsedTimer()
             // Create a new recording session in SwiftData
-            let session = RecordingSession(date: Date(), duration: 0)
+            let now = Date()
+            let session = RecordingSession(name: nil, date: now, duration: 0)
             self.currentSession = session
             self.modelContext?.insert(session)
             // Create audio buffer for this session
@@ -123,6 +126,20 @@ class AudioRecorderManager: NSObject, ObservableObject {
                     do {
                         // Write the audio buffer to the current file
                         try self.audioFile?.write(from: buffer)
+                        // --- Waveform calculation ---
+                        if let channelData = buffer.floatChannelData?[0] {
+                            let frameLength = Int(buffer.frameLength)
+                            var rms: Float = 0
+                            vDSP_rmsqv(channelData, 1, &rms, vDSP_Length(frameLength))
+                            let normalized = min(max(rms * 20, 0), 1) // Normalize for UI (tweak as needed)
+                            DispatchQueue.main.async {
+                                self.waveformSamples.append(normalized)
+                                if self.waveformSamples.count > 100 {
+                                    self.waveformSamples.removeFirst(self.waveformSamples.count - 100)
+                                }
+                            }
+                        }
+                        // --- End waveform calculation ---
                     } catch {
                         DispatchQueue.main.async {
                             self.error = error

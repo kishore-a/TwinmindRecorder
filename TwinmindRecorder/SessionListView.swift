@@ -4,6 +4,9 @@ import SwiftData
 struct SessionListView: View {
     @Query private var sessions: [RecordingSession]
     @Environment(\.modelContext) private var modelContext
+    @State private var renamingSession: RecordingSession? = nil
+    @State private var newSessionName: String = ""
+    @State private var showRenameAlert = false
     
     init() {
         let descriptor = FetchDescriptor<RecordingSession>(
@@ -26,11 +29,42 @@ struct SessionListView: View {
                         NavigationLink(destination: SessionDetailView(session: session)) {
                             SessionRowView(session: session)
                         }
+                        .contextMenu {
+                            Button("Rename") {
+                                renamingSession = session
+                                newSessionName = session.name
+                                showRenameAlert = true
+                            }
+                            Button(role: .destructive) {
+                                deleteSession(session)
+                            } label: {
+                                Text("Delete")
+                            }
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button("Rename") {
+                                renamingSession = session
+                                newSessionName = session.name
+                                showRenameAlert = true
+                            }.tint(.blue)
+                            Button(role: .destructive) {
+                                deleteSession(session)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
                     }
                     .onDelete(perform: deleteSessions)
                 }
             }
             .navigationTitle("Recording Sessions")
+            .alert("Rename Session", isPresented: $showRenameAlert, actions: {
+                TextField("Session Name", text: $newSessionName)
+                Button("Save", action: saveRenamedSession)
+                Button("Cancel", role: .cancel) {}
+            }, message: {
+                Text("Enter a new name for the session.")
+            })
             .refreshable {
                 // SwiftData automatically updates, but this provides pull-to-refresh UX
             }
@@ -43,6 +77,19 @@ struct SessionListView: View {
         }
         try? modelContext.save()
     }
+    
+    private func deleteSession(_ session: RecordingSession) {
+        modelContext.delete(session)
+        try? modelContext.save()
+    }
+    
+    private func saveRenamedSession() {
+        guard let session = renamingSession else { return }
+        session.name = newSessionName.trimmingCharacters(in: .whitespacesAndNewlines)
+        try? modelContext.save()
+        renamingSession = nil
+        newSessionName = ""
+    }
 }
 
 struct SessionRowView: View {
@@ -53,10 +100,13 @@ struct SessionRowView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 VStack(alignment: .leading) {
-                    Text(session.date, style: .date)
+                    Text(session.name)
                         .font(.headline)
-                    Text(session.date, style: .time)
+                    Text(session.date, style: .date)
                         .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    Text(session.date, style: .time)
+                        .font(.caption2)
                         .foregroundColor(.secondary)
                 }
                 Spacer()
