@@ -6,9 +6,9 @@ struct SessionDetailView: View {
     @Environment(\.modelContext) private var modelContext
     
     var body: some View {
-        List {
-            // Session header
-            Section {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                // Session header
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
                         VStack(alignment: .leading) {
@@ -33,29 +33,42 @@ struct SessionDetailView: View {
                     TranscriptionSummaryView(session: session)
                 }
                 .padding(.vertical, 8)
-            }
-            
-            // Audio Player
-            if !session.segments.isEmpty {
-                Section("Audio Playback") {
-                    AudioPlayerView(session: session)
+                .background(Color(.systemGray6))
+                .cornerRadius(12)
+
+                // Audio Player
+                if !session.segments.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Audio Playback")
+                            .font(.headline)
+                        AudioPlayerView(session: session)
+                    }
+                    .padding()
+                    .background(Color(.systemGray6))
+                    .cornerRadius(12)
                 }
-            }
-            
-            // Segments
-            Section("Audio Segments") {
-                if session.segments.isEmpty {
-                    ContentUnavailableView(
-                        "No Segments",
-                        systemImage: "waveform",
-                        description: Text("No audio segments found for this session")
-                    )
-                } else {
-                    ForEach(session.segments.sorted(by: { $0.startTime < $1.startTime })) { segment in
-                        SegmentRowView(segment: segment)
+
+                // Segments
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Audio Segments")
+                        .font(.headline)
+                    if session.segments.isEmpty {
+                        ContentUnavailableView(
+                            "No Segments",
+                            systemImage: "waveform",
+                            description: Text("No audio segments found for this session")
+                        )
+                    } else {
+                        ForEach(session.segments.sorted(by: { $0.startTime < $1.startTime })) { segment in
+                            SegmentRowView(segment: segment)
+                        }
                     }
                 }
+                .padding()
+                .background(Color(.systemGray6))
+                .cornerRadius(12)
             }
+            .padding()
         }
         .navigationTitle("Session Details")
         .navigationBarTitleDisplayMode(.inline)

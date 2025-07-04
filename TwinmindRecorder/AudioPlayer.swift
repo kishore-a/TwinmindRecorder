@@ -54,7 +54,7 @@ class AudioPlayer: NSObject, ObservableObject {
     
     // Play a specific segment
     func playSegment(_ segmentIndex: Int) {
-        guard let sessionId = currentSessionId,
+        guard let currentSessionId = currentSessionId,
               let audioData = allSegments[segmentIndex] else {
             error = "Audio data not found for segment \(segmentIndex)"
             return
@@ -166,7 +166,7 @@ class AudioPlayer: NSObject, ObservableObject {
     
     // Get current segment info
     func getCurrentSegmentInfo() -> (index: Int, time: String, duration: String)? {
-        guard let player = audioPlayer else { return nil }
+        guard audioPlayer != nil else { return nil }
         return (
             index: currentSegment,
             time: formattedTime(currentTime),

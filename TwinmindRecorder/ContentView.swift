@@ -45,6 +45,12 @@ struct ContentView: View {
                     }
                     .padding()
                     
+                    // Live waveform
+                    if recorder.isRecording {
+                        WaveformView(samples: recorder.waveformSamples, barColor: .blue, barWidth: 3, spacing: 2, maxHeight: 60)
+                            .padding(.vertical, 8)
+                    }
+                    
                     // Timer display
                     if recorder.isRecording {
                         Text(timerString(from: recorder.elapsedTime))
