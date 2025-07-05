@@ -7,7 +7,7 @@ struct WaveformView: View {
     let spacing: CGFloat
     let maxHeight: CGFloat
 
-    init(samples: [Float], barColor: Color = .blue, barWidth: CGFloat = 3, spacing: CGFloat = 2, maxHeight: CGFloat = 60) {
+    init(samples: [Float], barColor: Color = DesignSystem.Colors.waveformActive, barWidth: CGFloat = 3, spacing: CGFloat = 2, maxHeight: CGFloat = 60) {
         self.samples = samples
         self.barColor = barColor
         self.barWidth = barWidth
@@ -16,22 +16,60 @@ struct WaveformView: View {
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: spacing) {
-            ForEach(samples.indices, id: \.self) { i in
-                Capsule()
-                    .fill(barColor)
-                    .frame(width: barWidth, height: max(2, CGFloat(samples[i]) * maxHeight))
+        GeometryReader { geometry in
+            HStack(alignment: .center, spacing: spacing) {
+                ForEach(displayedSamples.indices, id: \.self) { i in
+                    RoundedRectangle(cornerRadius: barWidth / 2)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    barColor,
+                                    barColor.opacity(0.7)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(width: barWidth, height: max(2, CGFloat(displayedSamples[i]) * maxHeight))
+                        .shadow(color: barColor.opacity(0.3), radius: 1, x: 0, y: 1)
+                }
             }
+            .frame(maxWidth: .infinity)
+            .frame(height: maxHeight)
+            .animation(Animations.linear, value: displayedSamples)
         }
         .frame(height: maxHeight)
-        .animation(.linear(duration: 0.1), value: samples)
-        .background(Color(.systemGray6))
-        .cornerRadius(8)
+        .padding(.vertical, DesignSystem.Spacing.sm)
+    }
+    
+    // Calculate how many samples to display based on available width
+    private var displayedSamples: [Float] {
+        let maxSamples = 50 // Limit to prevent layout issues
+        if samples.count <= maxSamples {
+            return samples
+        } else {
+            // Take the most recent samples and downsample if needed
+            let recentSamples = Array(samples.suffix(maxSamples))
+            return recentSamples
+        }
     }
 }
 
 #Preview {
-    WaveformView(samples: Array(repeating: Float.random(in: 0...1), count: 50))
+    VStack(spacing: DesignSystem.Spacing.lg) {
+        WaveformView(samples: Array(repeating: Float.random(in: 0...1), count: 50))
+            .modernCard()
+            .padding()
+        
+        WaveformView(
+            samples: Array(repeating: Float.random(in: 0...1), count: 30),
+            barColor: DesignSystem.Colors.recording,
+            barWidth: 4,
+            spacing: 3,
+            maxHeight: 80
+        )
+        .modernCard()
         .padding()
-        .background(Color.black.opacity(0.1))
+    }
+    .background(DesignSystem.Colors.secondaryBackground)
 } 

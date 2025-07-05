@@ -8,6 +8,7 @@ class AudioPlayer: NSObject, ObservableObject {
     private var currentSessionId: UUID?
     private var currentSegmentIndex: Int = 0
     private var allSegments: [Int: Data] = [:]
+    private var sessionSegments: [AudioSegment] = [] // Store AudioSegment objects
     
     @Published var isPlaying = false
     @Published var currentTime: TimeInterval = 0
@@ -30,7 +31,7 @@ class AudioPlayer: NSObject, ObservableObject {
         }
     }
     
-    // Load a session for playback
+    // Load a session for playback from AudioBuffer (legacy method)
     func loadSession(_ sessionId: UUID, completion: @escaping (Bool) -> Void) {
         let segments = AudioBuffer.shared.getAllSegments(for: sessionId)
         
@@ -52,14 +53,60 @@ class AudioPlayer: NSObject, ObservableObject {
         }
     }
     
+    // Load a session for playback from RecordingSession (new method)
+    func loadSessionFromRecordingSession(_ session: RecordingSession, completion: @escaping (Bool) -> Void) {
+        DispatchQueue.main.async {
+            self.currentSessionId = session.id
+            self.sessionSegments = session.segments.sorted(by: { $0.startTime < $1.startTime })
+            self.totalSegments = self.sessionSegments.count
+            self.currentSegment = 0
+            self.currentTime = 0
+            self.duration = 0
+            self.isPlaying = false
+            
+            if !self.sessionSegments.isEmpty {
+                completion(true)
+            } else {
+                self.error = "No audio segments found for this session"
+                completion(false)
+            }
+        }
+    }
+    
     // Play a specific segment
     func playSegment(_ segmentIndex: Int) {
-        guard let currentSessionId = currentSessionId,
-              let audioData = allSegments[segmentIndex] else {
-            error = "Audio data not found for segment \(segmentIndex)"
+        guard let currentSessionId = currentSessionId else {
+            error = "No session loaded"
             return
         }
         
+        // Try to get audio data from buffer first (for backward compatibility)
+        if let audioData = allSegments[segmentIndex] {
+            playSegmentWithData(audioData, segmentIndex: segmentIndex)
+            return
+        }
+        
+        // If not in buffer, load from file URL
+        guard segmentIndex < sessionSegments.count else {
+            error = "Segment index out of range: \(segmentIndex)"
+            return
+        }
+        
+        let segment = sessionSegments[segmentIndex]
+        guard let fileURL = segment.fileURL else {
+            error = "No file URL for segment \(segmentIndex)"
+            return
+        }
+        
+        do {
+            let audioData = try Data(contentsOf: fileURL)
+            playSegmentWithData(audioData, segmentIndex: segmentIndex)
+        } catch {
+            self.error = "Failed to load audio file for segment \(segmentIndex): \(error.localizedDescription)"
+        }
+    }
+    
+    private func playSegmentWithData(_ audioData: Data, segmentIndex: Int) {
         do {
             // Stop current playback
             stop()
@@ -88,39 +135,59 @@ class AudioPlayer: NSObject, ObservableObject {
     
     // Play the current session from the beginning
     func playSession() {
-        if allSegments.isEmpty {
+        if sessionSegments.isEmpty && allSegments.isEmpty {
             error = "No audio segments available"
             return
         }
         
-        let firstSegmentIndex = allSegments.keys.sorted().first ?? 0
-        playSegment(firstSegmentIndex)
+        if !sessionSegments.isEmpty {
+            playSegment(0)
+        } else {
+            let firstSegmentIndex = allSegments.keys.sorted().first ?? 0
+            playSegment(firstSegmentIndex)
+        }
     }
     
     // Play next segment
     func playNextSegment() {
-        let sortedIndices = allSegments.keys.sorted()
-        if let currentIndex = sortedIndices.firstIndex(of: currentSegment),
-           currentIndex + 1 < sortedIndices.count {
-            playSegment(sortedIndices[currentIndex + 1])
+        if !sessionSegments.isEmpty {
+            if currentSegment + 1 < sessionSegments.count {
+                playSegment(currentSegment + 1)
+            } else {
+                stop()
+            }
         } else {
-            stop()
+            let sortedIndices = allSegments.keys.sorted()
+            if let currentIndex = sortedIndices.firstIndex(of: currentSegment),
+               currentIndex + 1 < sortedIndices.count {
+                playSegment(sortedIndices[currentIndex + 1])
+            } else {
+                stop()
+            }
         }
     }
     
     // Play previous segment
     func playPreviousSegment() {
-        let sortedIndices = allSegments.keys.sorted()
-        if let currentIndex = sortedIndices.firstIndex(of: currentSegment),
-           currentIndex > 0 {
-            playSegment(sortedIndices[currentIndex - 1])
+        if !sessionSegments.isEmpty {
+            if currentSegment > 0 {
+                playSegment(currentSegment - 1)
+            }
+        } else {
+            let sortedIndices = allSegments.keys.sorted()
+            if let currentIndex = sortedIndices.firstIndex(of: currentSegment),
+               currentIndex > 0 {
+                playSegment(sortedIndices[currentIndex - 1])
+            }
         }
     }
     
     // Play current segment
     func play() {
-        if audioPlayer == nil && !allSegments.isEmpty {
-            playSegment(currentSegment)
+        if audioPlayer == nil {
+            if !sessionSegments.isEmpty || !allSegments.isEmpty {
+                playSegment(currentSegment)
+            }
         } else {
             audioPlayer?.play()
             isPlaying = true
@@ -152,7 +219,11 @@ class AudioPlayer: NSObject, ObservableObject {
     
     // Seek to specific segment
     func seekToSegment(_ segmentIndex: Int) {
-        if allSegments.keys.contains(segmentIndex) {
+        if !sessionSegments.isEmpty {
+            if segmentIndex < sessionSegments.count {
+                playSegment(segmentIndex)
+            }
+        } else if allSegments.keys.contains(segmentIndex) {
             playSegment(segmentIndex)
         }
     }
@@ -176,23 +247,36 @@ class AudioPlayer: NSObject, ObservableObject {
     
     // Get all segment indices sorted
     func getSegmentIndices() -> [Int] {
-        return allSegments.keys.sorted()
+        if !sessionSegments.isEmpty {
+            return Array(0..<sessionSegments.count)
+        } else {
+            return allSegments.keys.sorted()
+        }
     }
     
     // Check if segment exists
     func hasSegment(_ index: Int) -> Bool {
-        return allSegments.keys.contains(index)
+        if !sessionSegments.isEmpty {
+            return index < sessionSegments.count
+        } else {
+            return allSegments.keys.contains(index)
+        }
     }
     
     // Get segment duration (estimated)
     func getSegmentDuration(_ index: Int) -> TimeInterval {
-        // This is an estimation based on typical audio settings
-        // For more accurate duration, you'd need to decode the audio file
-        guard let data = allSegments[index] else { return 0 }
-        
-        // Estimate based on WAV format: 16kHz, 16-bit, mono
-        let bytesPerSecond = 16000 * 2 // 16-bit = 2 bytes per sample
-        return Double(data.count) / Double(bytesPerSecond)
+        if !sessionSegments.isEmpty {
+            guard index < sessionSegments.count else { return 0 }
+            return sessionSegments[index].duration
+        } else {
+            // This is an estimation based on typical audio settings
+            // For more accurate duration, you'd need to decode the audio file
+            guard let data = allSegments[index] else { return 0 }
+            
+            // Estimate based on WAV format: 16kHz, 16-bit, mono
+            let bytesPerSecond = 16000 * 2 // 16-bit = 2 bytes per sample
+            return Double(data.count) / Double(bytesPerSecond)
+        }
     }
     
     // MARK: - Private Methods

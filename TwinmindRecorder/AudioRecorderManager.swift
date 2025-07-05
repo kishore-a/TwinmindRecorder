@@ -12,11 +12,12 @@ class AudioRecorderManager: NSObject, ObservableObject {
     private var recordingFormat: AVAudioFormat?
     private var segmentStartTime: Date?
     private var segmentTimer: Timer?
-    private let segmentDuration: TimeInterval = 30 // seconds, configurable
+    @Published var segmentDuration: TimeInterval = 30 // Configurable segment duration in seconds
     private var currentSegmentIndex: Int = 0
     private var currentSession: RecordingSession?
     
     @Published var isRecording = false
+    @Published var isPaused = false
     @Published var error: Error?
     @Published var permissionDenied = false
     @Published var segments: [(url: URL, startTime: Date)] = []
@@ -27,6 +28,8 @@ class AudioRecorderManager: NSObject, ObservableObject {
     private var modelContext: ModelContext?
     
     private var elapsedTimer: Timer?
+    private var pauseStartTime: Date?
+    private var totalPausedTime: TimeInterval = 0
     
     override init() {
         super.init()
@@ -84,6 +87,10 @@ class AudioRecorderManager: NSObject, ObservableObject {
             self.segments = []
             self.currentSegmentIndex = 0
             self.elapsedTime = 0
+            // Clear waveform samples for new recording
+            DispatchQueue.main.async {
+                self.waveformSamples.removeAll()
+            }
             self.startElapsedTimer()
             // Create a new recording session in SwiftData
             let now = Date()
@@ -123,29 +130,34 @@ class AudioRecorderManager: NSObject, ObservableObject {
                 // Install a tap to receive audio buffers in real time
                 audioEngine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] (buffer, time) in
                     guard let self = self else { return }
-                    do {
-                        // Write the audio buffer to the current file
-                        try self.audioFile?.write(from: buffer)
-                        // --- Waveform calculation ---
-                        if let channelData = buffer.floatChannelData?[0] {
-                            let frameLength = Int(buffer.frameLength)
-                            var rms: Float = 0
-                            vDSP_rmsqv(channelData, 1, &rms, vDSP_Length(frameLength))
-                            let normalized = min(max(rms * 20, 0), 1) // Normalize for UI (tweak as needed)
+                    
+                    // Write the audio buffer to the current file
+                    if let audioFile = self.audioFile {
+                        do {
+                            try audioFile.write(from: buffer)
+                        } catch {
+                            print("⚠️ Audio write error: \(error.localizedDescription)")
+                            // Don't stop recording for audio write errors, just log them
                             DispatchQueue.main.async {
-                                self.waveformSamples.append(normalized)
-                                if self.waveformSamples.count > 100 {
-                                    self.waveformSamples.removeFirst(self.waveformSamples.count - 100)
-                                }
+                                self.error = error
                             }
                         }
-                        // --- End waveform calculation ---
-                    } catch {
+                    }
+                    
+                    // --- Waveform calculation ---
+                    if let channelData = buffer.floatChannelData?[0] {
+                        let frameLength = Int(buffer.frameLength)
+                        var rms: Float = 0
+                        vDSP_rmsqv(channelData, 1, &rms, vDSP_Length(frameLength))
+                        let normalized = min(max(rms * 20, 0), 1) // Normalize for UI (tweak as needed)
                         DispatchQueue.main.async {
-                            self.error = error
-                            self.stopRecording()
+                            self.waveformSamples.append(normalized)
+                            if self.waveformSamples.count > 50 {
+                                self.waveformSamples.removeFirst(self.waveformSamples.count - 50)
+                            }
                         }
                     }
+                    // --- End waveform calculation ---
                 }
                 try audioEngine.start()
             }
@@ -169,38 +181,62 @@ class AudioRecorderManager: NSObject, ObservableObject {
     private func rotateSegment() {
         // Save current segment info to the published array and SwiftData
         if let url = self.outputURL, let startTime = self.segmentStartTime {
+            // Ensure the audio file is properly closed before saving
+            self.audioFile = nil
+            
             DispatchQueue.main.async {
                 self.segments.append((url: url, startTime: startTime))
             }
+            
             // Calculate segment duration
             let duration = segmentDuration
+            
             // Save segment to SwiftData if context and session are available
             if let context = self.modelContext, let session = self.currentSession {
                 DispatchQueue.main.async {
+                    // Verify the audio file exists before creating the segment
+                    guard FileManager.default.fileExists(atPath: url.path) else {
+                        print("⚠️ Audio file not found at path: \(url.path)")
+                        return
+                    }
+                    
                     let segment = AudioSegment(startTime: startTime.timeIntervalSince1970, duration: duration, fileURL: url)
                     segment.session = session
                     context.insert(segment)
                     session.segments.append(segment)
                     session.duration += duration
-                    try? context.save()
+                    
+                    // Save the context first to ensure the segment is persisted
+                    do {
+                        try context.save()
+                        print("✅ Audio segment saved successfully: \(url.lastPathComponent)")
+                    } catch {
+                        print("❌ Failed to save audio segment: \(error)")
+                        self.error = error
+                    }
                     
                     // Add audio data to buffer
                     if let audioData = try? Data(contentsOf: url) {
                         AudioBuffer.shared.addAudioData(audioData, for: session.id, segmentIndex: self.currentSegmentIndex)
                     }
                     
-                    // Trigger transcription for the new segment
-                    TranscriptionService.shared.transcribe(segment: segment, context: context) { _ in
-                        // Optionally handle completion or update UI
+                    // Trigger transcription for the new segment (this won't affect audio saving)
+                    TranscriptionService.shared.transcribe(segment: segment, context: context) { transcription in
+                        if let transcription = transcription {
+                            print("📝 Transcription completed for segment: \(transcription.status)")
+                        } else {
+                            print("⚠️ Transcription failed for segment, but audio was saved")
+                        }
                     }
                 }
             }
         }
-        // Close current file and prepare for the next segment
-        self.audioFile = nil
+        
+        // Prepare for the next segment
         self.outputURL = nil
         self.segmentStartTime = nil
         self.currentSegmentIndex += 1
+        
         // Start new segment if still recording
         if isRecording {
             beginRecordingSegment()
@@ -213,57 +249,136 @@ class AudioRecorderManager: NSObject, ObservableObject {
         audioEngine.stop()
         elapsedTimer?.invalidate()
         elapsedTimer = nil
+        
         do {
             try session.setActive(false)
         } catch {
             self.error = error
         }
-        // Save last segment
+        
+        // Save last segment with proper error handling
         if let url = self.outputURL, let startTime = self.segmentStartTime {
+            // Ensure the audio file is properly closed
+            self.audioFile = nil
+            
             self.segments.append((url: url, startTime: startTime))
             let duration = Date().timeIntervalSince(startTime)
+            
             if let context = self.modelContext, let session = self.currentSession {
                 DispatchQueue.main.async {
+                    // Verify the audio file exists before creating the segment
+                    guard FileManager.default.fileExists(atPath: url.path) else {
+                        print("⚠️ Audio file not found at path: \(url.path)")
+                        return
+                    }
+                    
                     let segment = AudioSegment(startTime: startTime.timeIntervalSince1970, duration: duration, fileURL: url)
                     segment.session = session
                     context.insert(segment)
                     session.segments.append(segment)
                     session.duration += duration
-                    try? context.save()
+                    
+                    // Save the context first to ensure the segment is persisted
+                    do {
+                        try context.save()
+                        print("✅ Final audio segment saved successfully: \(url.lastPathComponent)")
+                    } catch {
+                        print("❌ Failed to save final audio segment: \(error)")
+                        self.error = error
+                    }
                     
                     // Add audio data to buffer
                     if let audioData = try? Data(contentsOf: url) {
                         AudioBuffer.shared.addAudioData(audioData, for: session.id, segmentIndex: self.currentSegmentIndex)
                     }
                     
-                    // Trigger transcription for the last segment
-                    TranscriptionService.shared.transcribe(segment: segment, context: context) { _ in
-                        // Optionally handle completion or update UI
+                    // Trigger transcription for the last segment (this won't affect audio saving)
+                    TranscriptionService.shared.transcribe(segment: segment, context: context) { transcription in
+                        if let transcription = transcription {
+                            print("📝 Final transcription completed: \(transcription.status)")
+                        } else {
+                            print("⚠️ Final transcription failed, but audio was saved")
+                        }
                     }
                 }
             }
         }
-        self.audioFile = nil
+        
+        // Clean up
         self.outputURL = nil
         self.segmentStartTime = nil
         isRecording = false
         self.elapsedTime = 0
-        // Optionally, update the session's total duration in SwiftData
+        
+        // Clear waveform samples when stopping
+        DispatchQueue.main.async {
+            self.waveformSamples.removeAll()
+        }
+        
+        // Final save to ensure everything is persisted
         if let context = self.modelContext, let _ = self.currentSession {
             do {
                 try context.save()
+                print("✅ Session data saved successfully")
             } catch {
-                print("Failed to save context: \(error)")
+                print("❌ Failed to save session data: \(error)")
             }
         }
     }
     
     func pauseRecording() {
+        guard isRecording && !isPaused else { return }
+        
         segmentTimer?.invalidate()
         audioEngine.pause()
-        isRecording = false
         elapsedTimer?.invalidate()
         elapsedTimer = nil
+        pauseStartTime = Date()
+        isPaused = true
+        
+        // Clear waveform samples during pause
+        DispatchQueue.main.async {
+            self.waveformSamples.removeAll()
+        }
+    }
+    
+    func resumeRecording() {
+        guard isPaused else { return }
+        
+        do {
+            // Calculate total paused time
+            if let pauseStart = pauseStartTime {
+                totalPausedTime += Date().timeIntervalSince(pauseStart)
+                pauseStartTime = nil
+            }
+            
+            // Resume the audio engine
+            try audioEngine.start()
+            
+            // Restart timers
+            startElapsedTimer()
+            
+            // Restart segment timer if needed
+            if let startTime = segmentStartTime {
+                let elapsedInSegment = Date().timeIntervalSince(startTime) - totalPausedTime
+                let remainingTime = segmentDuration - elapsedInSegment
+                
+                if remainingTime > 0 {
+                    segmentTimer = Timer.scheduledTimer(withTimeInterval: remainingTime, repeats: false) { [weak self] _ in
+                        self?.rotateSegment()
+                    }
+                } else {
+                    // Segment should have already rotated, start new segment
+                    rotateSegment()
+                }
+            }
+            
+            isPaused = false
+            
+        } catch {
+            self.error = error
+            isPaused = false
+        }
     }
     
     @objc private func handleInterruption(_ notification: Notification) {
@@ -294,13 +409,58 @@ class AudioRecorderManager: NSObject, ObservableObject {
     private func startElapsedTimer() {
         elapsedTimer?.invalidate()
         elapsedTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            guard let self = self, self.isRecording else { return }
+            guard let self = self, self.isRecording && !self.isPaused else { return }
             self.elapsedTime += 1
+        }
+    }
+    
+    // Update segment duration (can be called during recording)
+    func updateSegmentDuration(_ newDuration: TimeInterval) {
+        guard newDuration >= 10 && newDuration <= 300 else { return } // 10 seconds to 5 minutes
+        
+        segmentDuration = newDuration
+        
+        // If currently recording, restart the segment timer with new duration
+        if isRecording && !isPaused, let startTime = segmentStartTime {
+            segmentTimer?.invalidate()
+            
+            let elapsedInSegment = Date().timeIntervalSince(startTime) - totalPausedTime
+            let remainingTime = segmentDuration - elapsedInSegment
+            
+            if remainingTime > 0 {
+                segmentTimer = Timer.scheduledTimer(withTimeInterval: remainingTime, repeats: false) { [weak self] _ in
+                    self?.rotateSegment()
+                }
+            } else {
+                // Current segment should rotate immediately
+                rotateSegment()
+            }
+        }
+    }
+    
+    // Get available segment duration presets
+    func getSegmentDurationPresets() -> [(String, TimeInterval)] {
+        return [
+            ("15 seconds", 15),
+            ("30 seconds", 30),
+            ("1 minute", 60),
+            ("2 minutes", 120),
+            ("5 minutes", 300)
+        ]
+    }
+    
+    // Ensure audio file is properly closed and saved
+    private func ensureAudioFileSaved() {
+        if let audioFile = self.audioFile {
+            // Close the audio file to ensure it's written to disk
+            self.audioFile = nil
+            print("🔒 Audio file closed and saved")
         }
     }
     
     deinit {
         NotificationCenter.default.removeObserver(self)
         segmentTimer?.invalidate()
+        ensureAudioFileSaved()
     }
 } 

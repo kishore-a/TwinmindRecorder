@@ -8,121 +8,209 @@ struct AudioPlayerView: View {
     @State private var showingSegmentPicker = false
     
     var body: some View {
-        VStack(spacing: 16) {
-            // Session info
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Audio Player")
-                    .font(.headline)
-                Text("Session: \(session.date, style: .date)")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            
-            // Load session button
-            if !isSessionLoaded {
-                Button("Load Session Audio") {
-                    loadSession()
-                }
-                .buttonStyle(.borderedProminent)
-            } else {
-                // Audio controls
-                VStack(spacing: 12) {
-                    // Progress info
-                    if let segmentInfo = audioPlayer.getCurrentSegmentInfo() {
-                        HStack {
-                            Text("Segment \(segmentInfo.index)")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Text("\(segmentInfo.time) / \(segmentInfo.duration)")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+        ModernCard(shadow: DesignSystem.Shadows.medium) {
+            VStack(spacing: DesignSystem.Spacing.lg) {
+                // Session info header
+                VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: DesignSystem.Spacing.xs) {
+                            Text("Audio Player")
+                                .font(DesignSystem.Typography.headline)
+                                .foregroundColor(DesignSystem.Colors.textPrimary)
+                            Text("Session: \(session.date, style: .date)")
+                                .font(DesignSystem.Typography.caption)
+                                .foregroundColor(DesignSystem.Colors.textSecondary)
                         }
-                    }
-                    
-                    // Progress bar
-                    if audioPlayer.duration > 0 {
-                        ProgressView(value: audioPlayer.currentTime, total: audioPlayer.duration)
-                            .progressViewStyle(LinearProgressViewStyle(tint: .blue))
-                            .onTapGesture { location in
-                                // Handle tap to seek (simplified)
-                                let percentage = location.x / UIScreen.main.bounds.width
-                                let seekTime = audioPlayer.duration * percentage
-                                audioPlayer.seek(to: seekTime)
-                            }
-                    }
-                    
-                    // Main controls
-                    HStack(spacing: 20) {
-                        // Previous segment
-                        Button(action: {
-                            audioPlayer.playPreviousSegment()
-                        }) {
-                            Image(systemName: "backward.fill")
-                                .font(.title2)
-                        }
-                        .disabled(!audioPlayer.hasSegment(audioPlayer.currentSegment - 1))
+                        Spacer()
                         
-                        // Play/Pause
-                        Button(action: {
-                            if audioPlayer.isPlaying {
-                                audioPlayer.pause()
-                            } else {
-                                audioPlayer.play()
+                        // Playback status indicator
+                        if audioPlayer.isPlaying {
+                            StatusBadge(
+                                text: "Playing",
+                                color: DesignSystem.Colors.success,
+                                icon: "play.circle.fill"
+                            )
+                        }
+                    }
+                }
+                
+                // Load session button
+                if !isSessionLoaded {
+                    GradientButton(
+                        gradient: DesignSystem.Colors.primaryGradient,
+                        action: { loadSession() }
+                    ) {
+                        HStack(spacing: DesignSystem.Spacing.sm) {
+                            Image(systemName: "play.circle.fill")
+                                .font(.title2)
+                            Text("Load Session Audio")
+                                .font(DesignSystem.Typography.subheadline)
+                                .fontWeight(.medium)
+                        }
+                    }
+                } else {
+                    // Audio controls
+                    VStack(spacing: DesignSystem.Spacing.lg) {
+                        // Progress info
+                        if let segmentInfo = audioPlayer.getCurrentSegmentInfo() {
+                            HStack {
+                                StatusBadge(
+                                    text: "Segment \(segmentInfo.index + 1)",
+                                    color: DesignSystem.Colors.primary,
+                                    icon: "waveform"
+                                )
+                                Spacer()
+                                Text("\(segmentInfo.time) / \(segmentInfo.duration)")
+                                    .font(DesignSystem.Typography.caption)
+                                    .foregroundColor(DesignSystem.Colors.textSecondary)
+                                    .monospacedDigit()
                             }
-                        }) {
-                            Image(systemName: audioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                                .font(.system(size: 50))
-                                .foregroundColor(.blue)
                         }
                         
-                        // Next segment
-                        Button(action: {
-                            audioPlayer.playNextSegment()
-                        }) {
-                            Image(systemName: "forward.fill")
-                                .font(.title2)
+                        // Progress bar
+                        if audioPlayer.duration > 0 {
+                            VStack(spacing: DesignSystem.Spacing.xs) {
+                                ProgressView(value: audioPlayer.currentTime, total: audioPlayer.duration)
+                                    .progressViewStyle(LinearProgressViewStyle(tint: DesignSystem.Colors.primary))
+                                    .scaleEffect(y: 1.5)
+                                    .onTapGesture { location in
+                                        // Handle tap to seek (simplified)
+                                        let percentage = location.x / UIScreen.main.bounds.width
+                                        let seekTime = audioPlayer.duration * percentage
+                                        audioPlayer.seek(to: seekTime)
+                                    }
+                                
+                                HStack {
+                                    Text(audioPlayer.formattedTime(audioPlayer.currentTime))
+                                        .font(DesignSystem.Typography.caption)
+                                        .foregroundColor(DesignSystem.Colors.textSecondary)
+                                        .monospacedDigit()
+                                    Spacer()
+                                    Text(audioPlayer.formattedTime(audioPlayer.duration))
+                                        .font(DesignSystem.Typography.caption)
+                                        .foregroundColor(DesignSystem.Colors.textSecondary)
+                                        .monospacedDigit()
+                                }
+                            }
                         }
-                        .disabled(!audioPlayer.hasSegment(audioPlayer.currentSegment + 1))
+                        
+                        // Main controls
+                        HStack(spacing: DesignSystem.Spacing.xl) {
+                            // Previous segment
+                            IconButton(
+                                icon: "backward.fill",
+                                color: DesignSystem.Colors.primary,
+                                size: 24,
+                                isEnabled: audioPlayer.hasSegment(audioPlayer.currentSegment - 1)
+                            ) {
+                                audioPlayer.playPreviousSegment()
+                            }
+                            
+                            // Play/Pause
+                            Button(action: {
+                                if audioPlayer.isPlaying {
+                                    audioPlayer.pause()
+                                } else {
+                                    audioPlayer.play()
+                                }
+                            }) {
+                                ZStack {
+                                    Circle()
+                                        .fill(audioPlayer.isPlaying ? DesignSystem.Colors.recordingGradient : DesignSystem.Colors.primaryGradient)
+                                        .frame(width: 70, height: 70)
+                                        .shadow(color: (audioPlayer.isPlaying ? DesignSystem.Colors.recording : DesignSystem.Colors.primary).opacity(0.3), radius: 10, x: 0, y: 5)
+                                    
+                                    Image(systemName: audioPlayer.isPlaying ? "pause.fill" : "play.fill")
+                                        .font(.system(size: 30, weight: .medium))
+                                        .foregroundColor(.white)
+                                }
+                            }
+                            .scaleEffect(audioPlayer.isPlaying ? 1.05 : 1.0)
+                            .animation(Animations.spring, value: audioPlayer.isPlaying)
+                            
+                            // Next segment
+                            IconButton(
+                                icon: "forward.fill",
+                                color: DesignSystem.Colors.primary,
+                                size: 24,
+                                isEnabled: audioPlayer.hasSegment(audioPlayer.currentSegment + 1)
+                            ) {
+                                audioPlayer.playNextSegment()
+                            }
+                        }
+                        
+                        // Secondary controls
+                        HStack(spacing: DesignSystem.Spacing.md) {
+                            // Stop button
+                            GradientButton(
+                                gradient: LinearGradient(colors: [DesignSystem.Colors.error, DesignSystem.Colors.error.opacity(0.8)], startPoint: .leading, endPoint: .trailing),
+                                isEnabled: audioPlayer.isPlaying,
+                                action: {
+                                    audioPlayer.stop()
+                                }
+                            ) {
+                                HStack(spacing: DesignSystem.Spacing.xs) {
+                                    Image(systemName: "stop.fill")
+                                        .font(.caption)
+                                    Text("Stop")
+                                        .font(DesignSystem.Typography.caption)
+                                        .fontWeight(.medium)
+                                }
+                            }
+                            
+                            // Segment picker
+                            GradientButton(
+                                gradient: DesignSystem.Colors.secondaryGradient,
+                                isEnabled: true,
+                                action: {
+                                    showingSegmentPicker = true
+                                }
+                            ) {
+                                HStack(spacing: DesignSystem.Spacing.xs) {
+                                    Image(systemName: "list.bullet")
+                                        .font(.caption)
+                                    Text("Select Segment")
+                                        .font(DesignSystem.Typography.caption)
+                                        .fontWeight(.medium)
+                                }
+                            }
+                        }
                     }
-                    
-                    // Stop button
-                    Button("Stop") {
-                        audioPlayer.stop()
+                }
+                
+                // Error display
+                if let error = audioPlayer.error {
+                    HStack(spacing: DesignSystem.Spacing.md) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(DesignSystem.Colors.error)
+                        VStack(alignment: .leading, spacing: DesignSystem.Spacing.xs) {
+                            Text("Playback Error")
+                                .font(DesignSystem.Typography.subheadline)
+                                .fontWeight(.medium)
+                            Text(error)
+                                .font(DesignSystem.Typography.caption)
+                                .foregroundColor(DesignSystem.Colors.textSecondary)
+                        }
+                        Spacer()
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(!audioPlayer.isPlaying)
-                    
-                    // Segment picker
-                    Button("Select Segment") {
-                        showingSegmentPicker = true
-                    }
-                    .buttonStyle(.bordered)
+                    .padding(DesignSystem.Spacing.md)
+                    .background(DesignSystem.Colors.error.opacity(0.1))
+                    .cornerRadius(DesignSystem.CornerRadius.sm)
                 }
             }
-            
-            // Error display
-            if let error = audioPlayer.error {
-                Text(error)
-                    .foregroundColor(.red)
-                    .font(.caption)
-                    .padding()
-                    .background(Color(.systemRed).opacity(0.1))
-                    .cornerRadius(8)
-            }
+            .padding(DesignSystem.Spacing.lg)
         }
-        .padding()
-        .background(Color(.systemGray6))
-        .cornerRadius(12)
         .sheet(isPresented: $showingSegmentPicker) {
             SegmentPickerView(audioPlayer: audioPlayer)
         }
     }
     
     private func loadSession() {
-        audioPlayer.loadSession(session.id) { success in
+        audioPlayer.loadSessionFromRecordingSession(session) { success in
             isSessionLoaded = success
+            if success {
+                audioPlayer.playSession()
+            }
         }
     }
 }
@@ -133,30 +221,57 @@ struct SegmentPickerView: View {
     
     var body: some View {
         NavigationView {
-            List {
-                ForEach(audioPlayer.getSegmentIndices(), id: \.self) { segmentIndex in
-                    Button(action: {
-                        audioPlayer.seekToSegment(segmentIndex)
-                        dismiss()
-                    }) {
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text("Segment \(segmentIndex)")
-                                    .font(.headline)
-                                Text("Duration: \(audioPlayer.formattedTime(audioPlayer.getSegmentDuration(segmentIndex)))")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+            ScrollView {
+                LazyVStack(spacing: DesignSystem.Spacing.sm) {
+                    ForEach(audioPlayer.getSegmentIndices(), id: \.self) { segmentIndex in
+                        ModernCard(shadow: DesignSystem.Shadows.small) {
+                            Button(action: {
+                                audioPlayer.seekToSegment(segmentIndex)
+                                dismiss()
+                            }) {
+                                HStack(spacing: DesignSystem.Spacing.md) {
+                                    // Segment number
+                                    ZStack {
+                                        Circle()
+                                            .fill(DesignSystem.Colors.primaryGradient)
+                                            .frame(width: 40, height: 40)
+                                        
+                                        Text("\(segmentIndex + 1)")
+                                            .font(DesignSystem.Typography.subheadline)
+                                            .fontWeight(.semibold)
+                                            .foregroundColor(.white)
+                                    }
+                                    
+                                    // Segment info
+                                    VStack(alignment: .leading, spacing: DesignSystem.Spacing.xs) {
+                                        Text("Segment \(segmentIndex + 1)")
+                                            .font(DesignSystem.Typography.subheadline)
+                                            .fontWeight(.medium)
+                                            .foregroundColor(DesignSystem.Colors.textPrimary)
+                                        Text("Duration: \(audioPlayer.formattedTime(audioPlayer.getSegmentDuration(segmentIndex)))")
+                                            .font(DesignSystem.Typography.caption)
+                                            .foregroundColor(DesignSystem.Colors.textSecondary)
+                                    }
+                                    
+                                    Spacer()
+                                    
+                                    // Current segment indicator
+                                    if segmentIndex == audioPlayer.currentSegment {
+                                        Image(systemName: "play.circle.fill")
+                                            .font(.title2)
+                                            .foregroundColor(DesignSystem.Colors.primary)
+                                    }
+                                }
+                                .padding(DesignSystem.Spacing.md)
                             }
-                            Spacer()
-                            if segmentIndex == audioPlayer.currentSegment {
-                                Image(systemName: "play.circle.fill")
-                                    .foregroundColor(.blue)
-                            }
+                            .buttonStyle(.plain)
                         }
+                        .padding(.horizontal, DesignSystem.Spacing.lg)
                     }
-                    .buttonStyle(.plain)
                 }
+                .padding(.vertical, DesignSystem.Spacing.md)
             }
+            .background(DesignSystem.Colors.secondaryBackground)
             .navigationTitle("Select Segment")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -178,7 +293,7 @@ struct CompactAudioPlayerView: View {
     @State private var isSessionLoaded = false
     
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: DesignSystem.Spacing.md) {
             // Play/Pause button
             Button(action: {
                 if !isSessionLoaded {
@@ -189,45 +304,50 @@ struct CompactAudioPlayerView: View {
                     audioPlayer.play()
                 }
             }) {
-                Image(systemName: audioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.title2)
-                    .foregroundColor(.blue)
+                ZStack {
+                    Circle()
+                        .fill(audioPlayer.isPlaying ? DesignSystem.Colors.recordingGradient : DesignSystem.Colors.primaryGradient)
+                        .frame(width: 36, height: 36)
+                        .shadow(color: (audioPlayer.isPlaying ? DesignSystem.Colors.recording : DesignSystem.Colors.primary).opacity(0.2), radius: 4, x: 0, y: 2)
+                    
+                    Image(systemName: audioPlayer.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.white)
+                }
             }
+            .scaleEffect(audioPlayer.isPlaying ? 1.1 : 1.0)
+            .animation(Animations.spring, value: audioPlayer.isPlaying)
             
             // Session info
-            VStack(alignment: .leading, spacing: 4) {
-                Text("\(session.segments.count) segments")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                
-                if audioPlayer.isPlaying {
-                    Text("Playing segment \(audioPlayer.currentSegment)")
-                        .font(.caption2)
-                        .foregroundColor(.blue)
-                }
+            VStack(alignment: .leading, spacing: DesignSystem.Spacing.xs) {
+                Text("Quick Play")
+                    .font(DesignSystem.Typography.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(DesignSystem.Colors.textPrimary)
+                Text(audioPlayer.isPlaying ? "Playing..." : "Tap to play")
+                    .font(DesignSystem.Typography.caption2)
+                    .foregroundColor(DesignSystem.Colors.textSecondary)
             }
             
             Spacer()
             
-            // Stop button
-            if audioPlayer.isPlaying {
-                Button(action: {
-                    audioPlayer.stop()
-                }) {
-                    Image(systemName: "stop.circle")
-                        .font(.title2)
-                        .foregroundColor(.red)
-                }
+            // Progress indicator
+            if audioPlayer.isPlaying && audioPlayer.duration > 0 {
+                ProgressRing(
+                    progress: audioPlayer.currentTime / audioPlayer.duration,
+                    color: DesignSystem.Colors.primary,
+                    size: 24,
+                    lineWidth: 2
+                )
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(Color(.systemGray6))
-        .cornerRadius(8)
+        .padding(DesignSystem.Spacing.md)
+        .background(DesignSystem.Colors.tertiaryBackground)
+        .cornerRadius(DesignSystem.CornerRadius.sm)
     }
     
     private func loadSession() {
-        audioPlayer.loadSession(session.id) { success in
+        audioPlayer.loadSessionFromRecordingSession(session) { success in
             isSessionLoaded = success
             if success {
                 audioPlayer.playSession()

@@ -9,13 +9,21 @@ class AudioBuffer: ObservableObject {
     private var sessionBuffers: [UUID: SessionAudioBuffer] = [:]
     private let bufferQueue = DispatchQueue(label: "com.twinmind.audiobuffer", qos: .userInitiated)
     
-    // Maximum buffer size per session (in MB)
-    private let maxBufferSizeMB: Int = 100
+    // Maximum buffer size per session (in MB) - reduced for better memory management
+    private let maxBufferSizeMB: Int = 50
+    
+    // Maximum number of sessions to keep in memory
+    private let maxSessionsInMemory = 10
+    
+    // Track recently accessed sessions for LRU cache
+    private var recentlyAccessedSessions: [UUID] = []
     
     // Create a new buffer for a session
     func createBuffer(for sessionId: UUID) {
         bufferQueue.async {
             self.sessionBuffers[sessionId] = SessionAudioBuffer(sessionId: sessionId)
+            self.updateRecentlyAccessed(sessionId)
+            self.manageMemory()
         }
     }
     
@@ -29,22 +37,36 @@ class AudioBuffer: ObservableObject {
             
             sessionBuffer.addSegment(data: data, index: segmentIndex)
             self.sessionBuffers[sessionId] = sessionBuffer
+            self.updateRecentlyAccessed(sessionId)
             
             // Check if buffer size exceeds limit
             if sessionBuffer.totalSize > self.maxBufferSizeMB * 1024 * 1024 {
                 self.cleanupOldSegments(for: sessionId)
             }
+            
+            self.manageMemory()
         }
     }
     
-    // Get audio data for a specific segment
+    // Get audio data for a specific segment with lazy loading
     func getAudioData(for sessionId: UUID, segmentIndex: Int) -> Data? {
         var result: Data?
         let semaphore = DispatchSemaphore(value: 0)
         
         bufferQueue.async {
+            // Check if session is in memory
             if let sessionBuffer = self.sessionBuffers[sessionId] {
                 result = sessionBuffer.getSegment(index: segmentIndex)
+                self.updateRecentlyAccessed(sessionId)
+            } else {
+                // Load from disk if not in memory
+                var sessionBuffer = SessionAudioBuffer(sessionId: sessionId)
+                if sessionBuffer.loadFromDisk() {
+                    result = sessionBuffer.getSegment(index: segmentIndex)
+                    self.sessionBuffers[sessionId] = sessionBuffer
+                    self.updateRecentlyAccessed(sessionId)
+                    self.manageMemory()
+                }
             }
             semaphore.signal()
         }
@@ -53,14 +75,25 @@ class AudioBuffer: ObservableObject {
         return result
     }
     
-    // Get all segments for a session
+    // Get all segments for a session with lazy loading
     func getAllSegments(for sessionId: UUID) -> [Int: Data] {
         var result: [Int: Data] = [:]
         let semaphore = DispatchSemaphore(value: 0)
         
         bufferQueue.async {
+            // Check if session is in memory
             if let sessionBuffer = self.sessionBuffers[sessionId] {
                 result = sessionBuffer.getAllSegments()
+                self.updateRecentlyAccessed(sessionId)
+            } else {
+                // Load from disk if not in memory
+                var sessionBuffer = SessionAudioBuffer(sessionId: sessionId)
+                if sessionBuffer.loadFromDisk() {
+                    result = sessionBuffer.getAllSegments()
+                    self.sessionBuffers[sessionId] = sessionBuffer
+                    self.updateRecentlyAccessed(sessionId)
+                    self.manageMemory()
+                }
             }
             semaphore.signal()
         }
@@ -94,6 +127,8 @@ class AudioBuffer: ObservableObject {
             
             if success {
                 self.sessionBuffers[sessionId] = sessionBuffer
+                self.updateRecentlyAccessed(sessionId)
+                self.manageMemory()
             }
             
             DispatchQueue.main.async {
@@ -102,47 +137,77 @@ class AudioBuffer: ObservableObject {
         }
     }
     
+    // Update recently accessed sessions for LRU cache
+    private func updateRecentlyAccessed(_ sessionId: UUID) {
+        recentlyAccessedSessions.removeAll { $0 == sessionId }
+        recentlyAccessedSessions.append(sessionId)
+    }
+    
+    // Manage memory by removing least recently used sessions
+    private func manageMemory() {
+        guard sessionBuffers.count > maxSessionsInMemory else { return }
+        
+        // Remove least recently used sessions
+        let sessionsToRemove = recentlyAccessedSessions.dropLast(maxSessionsInMemory)
+        
+        for sessionId in sessionsToRemove {
+            if let sessionBuffer = sessionBuffers[sessionId] {
+                // Save to disk before removing from memory
+                _ = sessionBuffer.saveToDisk()
+                sessionBuffers.removeValue(forKey: sessionId)
+                print("🧹 Removed session from memory: \(sessionId)")
+            }
+        }
+        
+        // Update recently accessed list
+        recentlyAccessedSessions = Array(recentlyAccessedSessions.suffix(maxSessionsInMemory))
+    }
+    
     // Clean up old segments to manage memory
     private func cleanupOldSegments(for sessionId: UUID) {
         guard var sessionBuffer = sessionBuffers[sessionId] else { return }
         
         // Keep only the most recent segments
-        let maxSegments = 50 // Keep last 50 segments
+        let maxSegments = 30 // Reduced from 50 for better memory management
         sessionBuffer.cleanupOldSegments(keeping: maxSegments)
         sessionBuffers[sessionId] = sessionBuffer
         
         print("🧹 Cleaned up old segments for session: \(sessionId)")
     }
     
-    // Remove buffer for a session
-    func removeBuffer(for sessionId: UUID) {
-        bufferQueue.async {
-            self.sessionBuffers.removeValue(forKey: sessionId)
-            print("🗑️ Removed buffer for session: \(sessionId)")
-        }
-    }
-    
-    // Get buffer statistics
-    func getBufferStats(for sessionId: UUID) -> BufferStats? {
-        var result: BufferStats?
+    // Get memory usage statistics
+    func getMemoryStats() -> [String: Any] {
+        var stats: [String: Any] = [:]
         let semaphore = DispatchSemaphore(value: 0)
         
         bufferQueue.async {
-            if let sessionBuffer = self.sessionBuffers[sessionId] {
-                result = sessionBuffer.getStats()
+            stats["sessionsInMemory"] = self.sessionBuffers.count
+            stats["maxSessions"] = self.maxSessionsInMemory
+            stats["recentlyAccessed"] = self.recentlyAccessedSessions
+            
+            var totalMemoryUsage: Int = 0
+            for (_, buffer) in self.sessionBuffers {
+                totalMemoryUsage += buffer.totalSize
             }
+            stats["totalMemoryUsageMB"] = Double(totalMemoryUsage) / (1024 * 1024)
+            
             semaphore.signal()
         }
         
         semaphore.wait()
-        return result
+        return stats
     }
     
-    // Clear all buffers (for memory management)
+    // Clear all buffers from memory (useful for memory warnings)
     func clearAllBuffers() {
         bufferQueue.async {
+            for (sessionId, sessionBuffer) in self.sessionBuffers {
+                _ = sessionBuffer.saveToDisk()
+                print("💾 Saved session to disk before clearing: \(sessionId)")
+            }
             self.sessionBuffers.removeAll()
-            print("🧹 Cleared all audio buffers")
+            self.recentlyAccessedSessions.removeAll()
+            print("🧹 Cleared all buffers from memory")
         }
     }
 }
