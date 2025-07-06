@@ -43,7 +43,15 @@ class AudioRecorderManager: NSObject, ObservableObject {
     
     private func setupAudioSession() {
         do {
-            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .allowAirPlay])
+            // To support background recording, ensure the Background Modes capability (Audio) is enabled in Xcode.
+            // Added .mixWithOthers and .allowBluetoothA2DP for robust background support.
+            try session.setCategory(.playAndRecord, mode: .default, options: [
+                .defaultToSpeaker,
+                .allowBluetooth,
+                .allowAirPlay,
+                .mixWithOthers, // Allow mixing with other audio (important for background)
+                .allowBluetoothA2DP // Support for Bluetooth A2DP
+            ])
             try session.setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
             self.error = error
@@ -410,7 +418,10 @@ class AudioRecorderManager: NSObject, ObservableObject {
         elapsedTimer?.invalidate()
         elapsedTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             guard let self = self, self.isRecording && !self.isPaused else { return }
-            self.elapsedTime += 1
+            DispatchQueue.main.async {
+                self.elapsedTime += 1
+                print("Timer tick: elapsedTime = \(self.elapsedTime)")
+            }
         }
     }
     
