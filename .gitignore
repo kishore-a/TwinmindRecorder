@@ -1,2 +1,3 @@
 # Ignore Info.plist to avoid committing secrets
 TwinmindRecorder/Info.plist 
+PROJECT_REFERENCE.md

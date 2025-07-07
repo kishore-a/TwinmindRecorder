@@ -7,74 +7,110 @@ struct SessionListView: View {
     @State private var renamingSession: RecordingSession? = nil
     @State private var newSessionName: String = ""
     @State private var showRenameAlert = false
+    @State private var searchText: String = ""
+    @State private var minSegments: Int = 0
     
     var body: some View {
         NavigationView {
-            ScrollView {
-                LazyVStack(spacing: DesignSystem.Spacing.md) {
-                    if sessions.isEmpty {
-                        VStack(spacing: DesignSystem.Spacing.lg) {
-                            Image(systemName: "mic.slash")
-                                .font(.system(size: 60))
-                                .foregroundColor(DesignSystem.Colors.textTertiary)
-                            
-                            VStack(spacing: DesignSystem.Spacing.sm) {
-                                Text("No Recordings")
-                                    .font(DesignSystem.Typography.title2)
-                                    .foregroundColor(DesignSystem.Colors.textPrimary)
-                                Text("Start recording to see your sessions here")
-                                    .font(DesignSystem.Typography.body)
+            VStack(spacing: 0) {
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(DesignSystem.Colors.textSecondary)
+                    TextField("Search sessions", text: $searchText)
+                        .textFieldStyle(.plain)
+                        .padding(.vertical, 8)
+                }
+                .padding(.horizontal, DesignSystem.Spacing.lg)
+                .background(DesignSystem.Colors.tertiaryBackground)
+                .cornerRadius(10)
+                .padding([.horizontal, .top], DesignSystem.Spacing.lg)
+                HStack {
+                    Text("Min Segments: ")
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.textSecondary)
+                    Stepper(value: $minSegments, in: 0...20) {
+                        Text("\(minSegments)")
+                            .font(DesignSystem.Typography.caption)
+                            .foregroundColor(DesignSystem.Colors.primary)
+                    }
+                }
+                .padding(.horizontal, DesignSystem.Spacing.lg)
+                .padding(.bottom, DesignSystem.Spacing.md)
+                ScrollView {
+                    LazyVStack(spacing: DesignSystem.Spacing.md) {
+                        if filteredAndGroupedSessions.isEmpty {
+                            VStack(spacing: DesignSystem.Spacing.lg) {
+                                Image(systemName: "mic.slash")
+                                    .font(.system(size: 60))
+                                    .foregroundColor(DesignSystem.Colors.textTertiary)
+                                
+                                VStack(spacing: DesignSystem.Spacing.sm) {
+                                    Text("No Recordings")
+                                        .font(DesignSystem.Typography.title2)
+                                        .foregroundColor(DesignSystem.Colors.textPrimary)
+                                    Text("Start recording to see your sessions here")
+                                        .font(DesignSystem.Typography.body)
+                                        .foregroundColor(DesignSystem.Colors.textSecondary)
+                                        .multilineTextAlignment(.center)
+                                }
+                            }
+                            .padding(DesignSystem.Spacing.xxl)
+                        } else {
+                            ForEach(filteredAndGroupedSessions.keys.sorted(by: >), id: \.self) { group in
+                                Section(header: Text(group)
+                                    .font(DesignSystem.Typography.subheadline)
                                     .foregroundColor(DesignSystem.Colors.textSecondary)
-                                    .multilineTextAlignment(.center)
-                            }
-                        }
-                        .padding(DesignSystem.Spacing.xxl)
-                    } else {
-                        ForEach(sessions) { session in
-                            NavigationLink(destination: SessionDetailView(session: session)) {
-                                SessionRowView(session: session)
-                            }
-                            .buttonStyle(.plain)
-                            .contextMenu {
-                                Button("Rename") {
-                                    renamingSession = session
-                                    newSessionName = session.name
-                                    showRenameAlert = true
-                                }
-                                Button(role: .destructive) {
-                                    deleteSession(session)
-                                } label: {
-                                    Text("Delete")
-                                }
-                            }
-                            .swipeActions(edge: .trailing) {
-                                Button("Rename") {
-                                    renamingSession = session
-                                    newSessionName = session.name
-                                    showRenameAlert = true
-                                }.tint(.blue)
-                                Button(role: .destructive) {
-                                    deleteSession(session)
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
+                                    .padding(.vertical, 4)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                ) {
+                                    ForEach(filteredAndGroupedSessions[group] ?? []) { session in
+                                        NavigationLink(destination: SessionDetailView(session: session)) {
+                                            SessionRowView(session: session)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .contextMenu {
+                                            Button("Rename") {
+                                                renamingSession = session
+                                                newSessionName = session.name
+                                                showRenameAlert = true
+                                            }
+                                            Button(role: .destructive) {
+                                                deleteSession(session)
+                                            } label: {
+                                                Text("Delete")
+                                            }
+                                        }
+                                        .swipeActions(edge: .trailing) {
+                                            Button("Rename") {
+                                                renamingSession = session
+                                                newSessionName = session.name
+                                                showRenameAlert = true
+                                            }.tint(.blue)
+                                            Button(role: .destructive) {
+                                                deleteSession(session)
+                                            } label: {
+                                                Label("Delete", systemImage: "trash")
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
+                    .padding(.horizontal, DesignSystem.Spacing.lg)
+                    .padding(.vertical, DesignSystem.Spacing.md)
                 }
-                .padding(.horizontal, DesignSystem.Spacing.lg)
-                .padding(.vertical, DesignSystem.Spacing.md)
-            }
-            .background(
-                LinearGradient(
-                    colors: [
-                        DesignSystem.Colors.background,
-                        DesignSystem.Colors.secondaryBackground
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
+                .background(
+                    LinearGradient(
+                        colors: [
+                            DesignSystem.Colors.background,
+                            DesignSystem.Colors.secondaryBackground
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
                 )
-            )
+            }
             .navigationTitle("Recording Sessions")
             .navigationBarTitleDisplayMode(.large)
             .alert("Rename Session", isPresented: $showRenameAlert, actions: {
@@ -85,9 +121,31 @@ struct SessionListView: View {
                 Text("Enter a new name for the session.")
             })
             .refreshable {
-                // SwiftData @Query automatically updates, so just trigger a save to ensure latest data
                 try? modelContext.save()
             }
+        }
+    }
+    
+    private var filteredAndGroupedSessions: [String: [RecordingSession]] {
+        let filtered = sessions.filter { session in
+            (searchText.isEmpty || session.name.localizedCaseInsensitiveContains(searchText)) &&
+            session.segments.count >= minSegments
+        }
+        return Dictionary(grouping: filtered, by: { session in
+            groupLabel(for: session.date)
+        })
+    }
+    
+    private func groupLabel(for date: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) {
+            return "Today"
+        } else if calendar.isDateInYesterday(date) {
+            return "Yesterday"
+        } else if let weekAgo = calendar.date(byAdding: .day, value: -7, to: Date()), date >= weekAgo {
+            return "This Week"
+        } else {
+            return "Earlier"
         }
     }
     
